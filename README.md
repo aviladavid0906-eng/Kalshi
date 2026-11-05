@@ -48,7 +48,19 @@ Phone alerts: install the free **ntfy** app, subscribe to a long random topic na
 | `python -m btcbot check` | Test your API key (demo/live) |
 
 ## Backtest results
-_Filled in below from the latest run._
+Run on 2026-11-05 over the previous 3 days: 1,307 real settled markets, default settings ($5 max per trade, 4¢ minimum edge).
+
+| Slice | Trades | Win rate vs price paid | P&L | ROI |
+|---|---|---|---|---|
+| Default (with exits) | 120 | 28% vs 31% | −$9.20 | −9.5% |
+| Hold to settlement | 120 | 28% vs 31% | −$14.25 | −14.7% |
+| 15-min markets | 39 | 41% vs 40% | −$5.06 | −13.8% |
+| Hourly markets | 81 | 22% vs 26% | −$4.14 | −6.8% |
+
+- **Kalshi's prices predicted outcomes better than the bot** across 35,195 one-minute snapshots (Brier 0.1343 vs 0.1376, lower is better).
+- **Bigger "edges" didn't reliably win more.** The minimum edge setting gave: 2¢ −0.8%, 4¢ −9.5%, 8¢ −6.4%, 12¢ +55%. The 12¢ result is only 8 trades (t = 1.0), which is within the range of luck. Don't tune the bot to it.
+- **The BTC price feed isn't the problem.** Coinbase vs. the official settlement index differed by +$3.6 ± $9.2 at settlement.
+- **Verdict: NO EDGE. Don't fund it.** The cheap contracts it buys win slightly *less* often than their price implies, so the market already knows what the model misses.
 
 ## Files
 - `btcbot/model.py` - pricing math (settlement averaging, volatility, fees, Kelly)
