@@ -54,19 +54,20 @@ Phone alerts: install the free **ntfy** app, subscribe to a long random topic na
 | `python -m btcbot check` | Test your API key (demo/live) |
 
 ## Backtest results
-Run on 2026-11-05 over the previous 3 days: 1,307 real settled markets, default settings ($5 max per trade, 4¢ minimum edge).
+Run on 2026-11-05 over the previous 3 days: 1,307 real settled markets, default entry rules ($5 max per trade, 4¢ minimum edge). These are the same 123 entries under each exit style:
 
-| Slice | Trades | Win rate vs price paid | P&L | ROI |
-|---|---|---|---|---|
-| Default (with exits) | 120 | 28% vs 31% | −$9.20 | −9.5% |
-| Hold to settlement | 120 | 28% vs 31% | −$14.25 | −14.7% |
-| 15-min markets | 39 | 41% vs 40% | −$5.06 | −13.8% |
-| Hourly markets | 81 | 22% vs 26% | −$4.14 | −6.8% |
+| Exit style | P&L | ROI | t |
+|---|---|---|---|
+| **Follow the calls:** take-profit + stop (default, `EXIT_STYLE=target`) | −$16.07 | −16.1% | −2.5 |
+| Take-profit, no stop | −$23.11 | −23.1% | −2.9 |
+| Bot manages exits + stop (`EXIT_STYLE=dynamic`) | −$9.52 | −9.5% | −0.8 |
+| Hold to settlement | −$15.02 | −15.0% | −1.0 |
 
-- **Kalshi's prices predicted outcomes better than the bot** across 35,195 one-minute snapshots (Brier 0.1343 vs 0.1376, lower is better).
-- **Bigger "edges" didn't reliably win more.** The minimum edge setting gave: 2¢ −0.8%, 4¢ −9.5%, 8¢ −6.4%, 12¢ +55%. The 12¢ result is only 8 trades (t = 1.0), which is within the range of luck. Don't tune the bot to it.
-- **The BTC price feed isn't the problem.** Coinbase vs. the official settlement index differed by +$3.6 ± $9.2 at settlement.
-- **Verdict: NO EDGE. Don't fund it.** The cheap contracts it buys win slightly *less* often than their price implies, so the market already knows what the model misses.
+- **Every exit style loses.** A t of −2.5 or lower means the loss is very unlikely to be bad luck.
+- **Fixed take-profits win often but small, and the losers still go to $0.** Following the calls turned $100 into about $84 in 3 days.
+- **Kalshi's prices predicted outcomes better than the bot** (Brier 0.1329 vs 0.1364 over 35,203 one-minute snapshots).
+- **Bigger minimum edges looked better but prove nothing:** 8¢ gave +2.8% on 23 trades and 12¢ gave +27% on 8 trades. Both are too few to trust (t ≤ 0.7).
+- **Verdict: NO EDGE. Don't fund it.**
 
 ## Files
 - `btcbot/model.py` - pricing math (settlement averaging, volatility, fees, Kelly)
