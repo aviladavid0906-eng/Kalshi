@@ -71,6 +71,12 @@ Run on 2026-11-05 over the previous 3 days: 1,307 real settled markets, default 
 - **Bigger minimum edges looked better but prove nothing:** 8¢ gave +2.8% on 23 trades and 12¢ gave +27% on 8 trades. Both are too few to trust.
 - **Verdict: NO EDGE. Don't fund it.**
 
+## Other methods tested (2026-11-05, same 3 days)
+- **Buying cheap contracts loses.** Hourly-market contracts priced 3–40¢, bought 15–60 minutes before close, lost 2–5¢ per $1 after fees (t as low as −3.0). The bot's average buy (31¢) sat right in this zone.
+- **Buying likely winners roughly breaks even.** Contracts priced 60–97¢ made 0 to +1.5¢ per $1, which isn't statistically different from zero.
+- **Arbitrage is gone.** Across strikes in the same hour, and between the 15-minute and hourly markets that settle on the same average: 0 and 1 opportunities (worth 0.5¢) in 7,354 one-minute snapshots.
+- **Conclusion: no profitable method found.** The prices are efficient and fees take the rest.
+
 ## Files
 - `btcbot/model.py` - pricing math (settlement averaging, volatility, fees, Kelly)
 - `btcbot/strategy.py` - UP/DOWN signals and exit rules
