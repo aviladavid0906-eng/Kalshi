@@ -235,3 +235,26 @@ def test_percent_take_profits():
     q = parse_quote(MARKET, "KXBTC15M")
     sig = evaluate(q, 100_000, SIG, q.close_ts - 600, c)[0][0]
     assert sig.direction == "UP" and sig.take_profit == 0.47 and "(+50% rule)" in sig.text(1)
+
+
+def test_scan_hides_calls_that_fail_at_the_real_size(monkeypatch, capsys):
+    import btcbot.__main__ as cli
+    from btcbot.strategy import Signal
+    q = parse_quote({**MARKET, "yes_bid_dollars": "0.1900", "yes_ask_dollars": "0.2000"}, "KXBTC15M")
+    # edge clears 4c at the $5 reference size but not at the 2-contract size the bankroll allows
+    sig = Signal(q, "yes", 0.20, 0.27, 0.2525, 0.041, 600, 0.27)  # 4.1c at 25x, 3.75c at 2x
+
+    class FakeBot:
+        def __init__(self, *a, **k):
+            pass
+
+        def scan(self, rows_limit=12):
+            return 100_000.0, SIG, [{"quote": q, "fair": 0.27, "signals": [sig], "t_rem": 600, "best_raw": 0.04}]
+
+    monkeypatch.setattr("btcbot.bot.Bot", FakeBot)
+
+    class Args:
+        rows = 5
+    cli.cmd_scan(cfg(), Args())
+    out = capsys.readouterr().out
+    assert "BUY" not in out and "below the 4c bar" in out

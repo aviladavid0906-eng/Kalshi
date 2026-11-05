@@ -42,8 +42,12 @@ def cmd_scan(cfg: Settings, args) -> None:
                 s.plan(n, cfg)
             tp = f"TP {s.take_profit:.2f}" if s.take_profit else "TP none (hold)"
             stop = f" | stop {s.stop:.2f}" if s.stop else ""
-            call = (f"BUY {s.direction} ({s.side.upper()}) at <= {s.max_entry:.2f} | {tp}{stop} | "
-                    f"{max(n, 1)}x (${max(n, 1) * s.price:.2f}) | edge +{s.edge * 100:.1f}c")
+            if n < 1 or s.edge < cfg.min_edge:  # same check `run` makes after sizing
+                call = (f"pass (edge {s.edge * 100:+.1f}c at your size {max(n, 1)}x, "
+                        f"below the {cfg.min_edge * 100:.0f}c bar)")
+            else:
+                call = (f"BUY {s.direction} ({s.side.upper()}) at <= {s.max_entry:.2f} | {tp}{stop} | "
+                        f"{n}x (${n * s.price:.2f}) | edge +{s.edge * 100:.1f}c")
         else:
             call = f"pass (best edge {r['best_raw'] * 100:+.1f}c)"
         print(f"{name:<44} {_dur(r['t_rem']):>7} {q.yes_bid:>6.3f} {q.yes_ask:>6.3f} {r['fair']:>6.3f}  {call}")
