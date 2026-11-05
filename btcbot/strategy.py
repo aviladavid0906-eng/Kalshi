@@ -119,6 +119,26 @@ def take_profit_price(fair_side: float, count: int, cfg) -> float | None:
     return None
 
 
+def take_profit_for(direction_label: str, entry: float, fair_side: float, count: int, cfg) -> float | None:
+    """Fixed take-profit for a new position.
+
+    TP_UP_PCT / TP_DOWN_PCT (defaults 0.60 / 0.40): sell when the price is that far above
+    what you paid, e.g. UP bought at $0.30 -> sell at $0.48. Rounded up to the cent. If
+    the target is $1 or more, there is nothing to take: hold to settlement.
+    A percentage of 0 (and range markets) use the fair-value target instead.
+    """
+    pct = {"UP": cfg.tp_up_pct, "DOWN": cfg.tp_down_pct}.get(direction_label, 0.0)
+    if pct > 0:
+        tp = math.ceil(round(entry * (1.0 + pct) * 100, 6)) / 100
+        return tp if tp < 1.0 else None
+    return take_profit_price(fair_side, count, cfg)
+
+
+def tp_rule(direction_label: str, cfg) -> str:
+    pct = {"UP": cfg.tp_up_pct, "DOWN": cfg.tp_down_pct}.get(direction_label, 0.0)
+    return f"+{pct:.0%} rule" if pct > 0 else "fair value"
+
+
 def stop_price(entry: float, cfg) -> float | None:
     if cfg.stop_loss_pct <= 0:
         return None
@@ -138,6 +158,7 @@ class Signal:
     max_entry: float = 0.0
     take_profit: float | None = None
     stop: float | None = None
+    tp_note: str = ""
 
     @property
     def direction(self) -> str:
@@ -147,14 +168,16 @@ class Signal:
         """Fill in entry / take-profit / stop for a `count`-contract trade."""
         self.edge = self.p_cons - self.price - taker_fee(self.price, count, cfg.taker_fee_rate) / count
         self.max_entry = max(max_entry_price(self.p_cons, count, cfg), self.price)
-        self.take_profit = take_profit_price(self.p_win, count, cfg)
+        self.take_profit = take_profit_for(self.direction, self.price, self.p_win, count, cfg)
+        self.tp_note = tp_rule(self.direction, cfg)
         self.stop = stop_price(self.price, cfg)
         return self
 
     def text(self, count: int | None = None) -> str:
         q = self.quote
         size = f"{count}x " if count else ""
-        tp = f"sell at ${self.take_profit:.2f}" if self.take_profit else "none, hold to settlement"
+        tp = (f"sell at ${self.take_profit:.2f} ({self.tp_note})" if self.take_profit
+              else "none, hold to settlement (target would be $1+)")
         stop = f" | stop: ${self.stop:.2f}" if self.stop else ""
         return (f"BUY {self.direction} ({self.side.upper()}) {size}on {q.ticker} [{q.label}] | "
                 f"entry: buy at or below ${self.max_entry:.2f} (ask now ${self.price:.3f}) | "

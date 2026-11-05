@@ -11,7 +11,7 @@ import math
 
 from .kalshi import num, parse_book
 from .model import taker_fee
-from .strategy import stop_price
+from .strategy import stop_price, take_profit_for
 
 
 def take(levels: list[tuple[float, float]], want: float, limit: float, buying: bool) -> tuple[float, float]:
@@ -60,7 +60,8 @@ class PaperBroker:
             event_ticker=sig.quote.event_ticker, side=sig.side, count=filled, entry_price=avg,
             entry_fee=taker_fee(avg, filled, self.cfg.taker_fee_rate), close_ts=sig.quote.close_ts,
             p_win=sig.p_win, edge=sig.edge, label=sig.quote.label, ts=now,
-            take_profit=sig.take_profit, stop_price=stop_price(avg, self.cfg))
+            take_profit=take_profit_for(sig.direction, avg, sig.p_win, filled, self.cfg),
+            stop_price=stop_price(avg, self.cfg))
 
     def sell(self, pos, min_price: float, reason: str, now: float, at_limit: bool = False) -> float | None:
         """at_limit: record the fill at min_price, like a resting take-profit order would get."""
@@ -127,7 +128,8 @@ class LiveBroker:
             event_ticker=sig.quote.event_ticker, side=sig.side, count=filled, entry_price=sig.price,
             entry_fee=taker_fee(sig.price, filled, self.cfg.taker_fee_rate), close_ts=sig.quote.close_ts,
             p_win=sig.p_win, edge=sig.edge, label=sig.quote.label, ts=now,
-            take_profit=sig.take_profit, stop_price=stop_price(sig.price, self.cfg))
+            take_profit=take_profit_for(sig.direction, sig.price, sig.p_win, filled, self.cfg),
+            stop_price=stop_price(sig.price, self.cfg))
 
     def sell(self, pos, min_price: float, reason: str, now: float, at_limit: bool = False) -> float | None:
         filled = self._order(pos.ticker, "sell", pos.side, int(pos.count), min_price)

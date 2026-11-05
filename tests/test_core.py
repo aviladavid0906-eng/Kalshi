@@ -208,3 +208,19 @@ def test_settings_coercion_and_validation(monkeypatch):
     monkeypatch.setenv("MAX_OPEN_DOLLARS", "20")
     with pytest.raises(ValueError):
         Settings.from_env(None)
+
+
+def test_percent_take_profits():
+    from btcbot.strategy import take_profit_for, take_profit_price
+    c = cfg()
+    assert (c.tp_up_pct, c.tp_down_pct) == (0.60, 0.40)
+    assert take_profit_for("UP", 0.30, 0.5, 2, c) == 0.48       # +60%
+    assert take_profit_for("DOWN", 0.30, 0.5, 2, c) == 0.42     # +40%
+    assert take_profit_for("UP", 0.31, 0.5, 2, c) == 0.50       # 0.496 rounds up to the cent
+    assert take_profit_for("UP", 0.65, 0.9, 2, c) is None       # $1.04 is impossible: hold
+    assert take_profit_for("DOWN", 0.72, 0.9, 2, c) is None
+    assert take_profit_for("UP", 0.30, 0.5, 2, cfg(tp_up_pct=0.0)) == take_profit_price(0.5, 2, c)
+    assert take_profit_for("IN RANGE", 0.30, 0.5, 2, c) == take_profit_price(0.5, 2, c)
+    q = parse_quote(MARKET, "KXBTC15M")
+    sig = evaluate(q, 100_000, SIG, q.close_ts - 600, c)[0][0]
+    assert sig.direction == "UP" and sig.take_profit == 0.50 and "(+60% rule)" in sig.text(1)

@@ -67,6 +67,8 @@ class Settings:
 
     # --- exits --------------------------------------------------------------
     stop_loss_pct: float = 0.50          # sell if the bid falls this far below entry (0 = off)
+    tp_up_pct: float = 0.60              # UP bets: take profit at +60% over what you paid (0 = fair-value target)
+    tp_down_pct: float = 0.40            # DOWN bets: take profit at +40% over what you paid
     exit_style: str = "target"           # target = fixed take-profit set at entry; dynamic = follow fair value
     edge_exit: bool = True               # dynamic style only: sell when the bid beats current fair value
 
@@ -124,6 +126,8 @@ class Settings:
             problems.append("MIN_EDGE must be >= 0 (a negative edge means a losing bet by the bot's own math)")
         if self.exit_style not in ("target", "dynamic"):
             problems.append("EXIT_STYLE must be target or dynamic")
+        if not (0 <= self.tp_up_pct <= 10 and 0 <= self.tp_down_pct <= 10):
+            problems.append("TP_UP_PCT and TP_DOWN_PCT must be between 0 and 10 (0.60 = +60%)")
         if not 0 <= self.stop_loss_pct < 1:
             problems.append("STOP_LOSS_PCT must be in [0, 1)")
         if problems:
