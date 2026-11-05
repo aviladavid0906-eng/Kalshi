@@ -12,10 +12,12 @@ Works out what each Kalshi bitcoin contract is really worth, calls **UP** or **D
 - **Only bets on clear mispricings.** Edge = worst-case win chance (under both low- and high-volatility assumptions) − price − Kalshi fee. It must be ≥ `MIN_EDGE` (default 4¢ per $1 contract).
 - **UP** = YES on "above $X" / "up in 15 min"; **DOWN** = NO on the same market.
 - **Live prices only.** Every decision uses the live order book. Kalshi's market list can lag the book by 10+ seconds, so the bot never trades on it.
-- **Exits**
-  - *Take profit / model exit:* sell when the bid pays more than the bot's fair value.
-  - *Stop loss:* sell if the bid falls `STOP_LOSS_PCT` (default 50%) below entry. On binary contracts this often sells near the bottom. `STOP_LOSS_PCT=0` holds to settlement.
-  - Otherwise hold until it settles at $1 or $0.
+- **Every call is a trade plan**: entry, take-profit and stop, plus a size for your balance.
+  - *Entry:* buy at or below this price. Above it, the edge is gone after fees.
+  - *Take profit:* the price where Kalshi has caught up to the bot's fair value. Rest a limit sell there right after you buy.
+  - *Stop:* `STOP_LOSS_PCT` below entry (default 50%). Kalshi has no stop orders, so `run` alerts you to sell by hand. `STOP_LOSS_PCT=0` turns it off.
+  - If neither is hit, the contract settles at $1 or $0.
+  - The paper bot follows the same fixed plan (`EXIT_STYLE=target`), so paper results match following the alerts. `EXIT_STYLE=dynamic` instead sells whenever the bid beats the bot's *current* fair value; you can't copy that by hand.
 - **Limits that hold no matter what the model says**
   - Per trade (`MAX_TRADE_DOLLARS`, $5), total open (`MAX_OPEN_DOLLARS`, $15).
   - Daily loss (`MAX_DAILY_LOSS_DOLLARS`, $10). Open positions count as already lost, so the day can't go past the limit.
@@ -30,6 +32,9 @@ Works out what each Kalshi bitcoin contract is really worth, calls **UP** or **D
 4. `python -m btcbot scan`: the live board, showing each market's bid/ask, the bot's fair price and its UP/DOWN call.
 5. `python -m btcbot run`: paper-trades continuously. The computer must stay on; a ~$5/mo cloud server also works.
 6. `python -m btcbot report`: P&L for today, the week and the month, shown in hours of work, plus the go/no-go verdict.
+
+**Example alert:**
+`CALL DOWN: BUY DOWN (NO) 2x on KXBTC15M-26NOV051530-30 [Target Price: $75,971.55] | entry: buy at or below $0.35 (ask now $0.310) | take profit: sell at $0.60 | stop: $0.15 | bot fair $0.565, edge +4.6c after fees | closes in 3 min`
 
 Phone alerts: install the free **ntfy** app, subscribe to a long random topic name, and set `NTFY_TOPIC` to the same name in `.env`.
 

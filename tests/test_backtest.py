@@ -58,3 +58,14 @@ def test_rolling_sigma_warms_up():
     closes = [100.0 * math.exp(0.001 * (1 if i % 2 else -1)) for i in range(30)]
     s = rolling_sigma(closes, 30)
     assert s[5] is None and s[-1] is not None
+
+
+def test_target_take_profit_fills_on_the_minute_high():
+    cfg = Settings()
+    sig = 0.5 / math.sqrt(SECONDS_PER_YEAR)
+    ends = [CLOSE - 60 * k for k in range(14, 0, -1)]
+    cs = [candle(e, 0.30, 0.31) for e in ends]
+    cs[5]["yes_bid"]["high_dollars"] = "0.9000"        # bid spiked inside minute 6
+    t = simulate_market(q0(), cs, 0, {e: 100_000.0 for e in ends}, {e: sig for e in ends}, cfg)
+    assert t.reason == "take_profit" and t.exit_price < 0.9   # sold at the TP limit, not the spike
+    assert t.pnl > 0                                           # even though the market settled NO

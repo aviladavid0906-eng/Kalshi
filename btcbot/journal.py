@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS positions(
   entry_price REAL NOT NULL, entry_fee REAL NOT NULL, entry_ts REAL NOT NULL,
   close_ts REAL, p_win REAL, edge REAL, label TEXT, order_id TEXT,
   status TEXT NOT NULL DEFAULT 'open',
-  exit_price REAL, exit_fee REAL, exit_ts REAL, exit_reason TEXT, pnl REAL);
+  exit_price REAL, exit_fee REAL, exit_ts REAL, exit_reason TEXT, pnl REAL,
+  take_profit REAL, stop_price REAL);
 CREATE INDEX IF NOT EXISTS positions_mode_status ON positions(mode, status);
 CREATE TABLE IF NOT EXISTS observations(
   ts REAL NOT NULL, ticker TEXT NOT NULL, series TEXT, close_ts REAL, t_rem REAL,
@@ -52,6 +53,8 @@ class Position:
     exit_ts: float | None
     exit_reason: str | None
     pnl: float | None
+    take_profit: float | None = None
+    stop_price: float | None = None
 
     @property
     def cost(self) -> float:
@@ -63,18 +66,25 @@ class Journal:
         self.db = sqlite3.connect(path)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        cols = {r[1] for r in self.db.execute("PRAGMA table_info(positions)")}
+        for col in ("take_profit", "stop_price"):  # databases made by older versions
+            if col not in cols:
+                self.db.execute(f"ALTER TABLE positions ADD COLUMN {col} REAL")
+        self.db.commit()
 
     def _pos(self, row: sqlite3.Row) -> Position:
         return Position(**{k: row[k] for k in row.keys()})
 
     # --- trades ----------------------------------------------------------------
     def open_position(self, *, mode, ticker, series, event_ticker, side, count, entry_price, entry_fee,
-                      close_ts, p_win, edge, label="", order_id=None, ts=None) -> int:
+                      close_ts, p_win, edge, label="", order_id=None, ts=None,
+                      take_profit=None, stop_price=None) -> int:
         cur = self.db.execute(
             "INSERT INTO positions(mode,ticker,series,event_ticker,side,count,entry_price,entry_fee,entry_ts,"
-            "close_ts,p_win,edge,label,order_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "close_ts,p_win,edge,label,order_id,take_profit,stop_price) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (mode, ticker, series, event_ticker, side, count, entry_price, entry_fee,
-             ts if ts is not None else time.time(), close_ts, p_win, edge, label, order_id))
+             ts if ts is not None else time.time(), close_ts, p_win, edge, label, order_id,
+             take_profit, stop_price))
         self.db.commit()
         return cur.lastrowid
 
@@ -94,7 +104,8 @@ class Journal:
                                      event_ticker=pos.event_ticker, side=pos.side, count=count,
                                      entry_price=pos.entry_price, entry_fee=fee_part, close_ts=pos.close_ts,
                                      p_win=pos.p_win, edge=pos.edge, label=pos.label,
-                                     order_id=pos.order_id, ts=pos.entry_ts)
+                                     order_id=pos.order_id, ts=pos.entry_ts,
+                                     take_profit=pos.take_profit, stop_price=pos.stop_price)
             pos = self.get(pid)
         pnl = pos.count * exit_price - exit_fee - pos.count * pos.entry_price - pos.entry_fee
         self.db.execute(

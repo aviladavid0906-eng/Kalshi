@@ -74,7 +74,8 @@ def test_paper_bot_buys_mispriced_up_then_settles(tmp_path):
     pos = bot.journal.open_positions("paper")[0]
     assert pos.side == "yes" and pos.entry_price == 0.31 and pos.count >= 1
     assert pos.cost <= bot.cfg.max_trade_dollars
-    assert any(t.startswith("BOUGHT UP") for t, _ in msgs)
+    assert any(t.startswith("CALL UP") and "take profit: sell at" in m for t, m in msgs)
+    assert pos.take_profit is not None and pos.stop_price == 0.15
     # same event: no second bet
     assert bot.step(now=T0 + 10)["entries"] == 0
     # market settles YES
@@ -93,6 +94,7 @@ def test_take_profit_when_market_overshoots(tmp_path):
     assert bot.step(now=T0 + 10)["exits"] == 1
     closed = bot.journal.closed_positions("paper")[0]
     assert closed.exit_reason == "take_profit" and closed.pnl > 0
+    assert closed.exit_price == closed.take_profit    # filled at the resting limit, not the jumped bid
     # NO now looks cheap (fair ~0.5, NO ask 0.20), but the bot never flips sides in a market it traded
     assert bot.step(now=T0 + 20)["entries"] == 0
 
@@ -226,3 +228,21 @@ def test_live_quotes_prices_held_and_nearest(tmp_path):
     out = bot.live_quotes([far, q], 100_000.0, T0, limit=1)
     assert [x.ticker for x in out] == [q.ticker]
     assert out[0].yes_ask == pytest.approx(0.31) and out[0].yes_ask_size == 100
+
+
+def test_old_database_gets_new_columns(tmp_path):
+    import sqlite3
+    path = str(tmp_path / "old.db")
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE positions(id INTEGER PRIMARY KEY AUTOINCREMENT, mode TEXT NOT NULL, ticker TEXT NOT NULL,"
+               " series TEXT, event_ticker TEXT, side TEXT NOT NULL, count REAL NOT NULL, entry_price REAL NOT NULL,"
+               " entry_fee REAL NOT NULL, entry_ts REAL NOT NULL, close_ts REAL, p_win REAL, edge REAL, label TEXT,"
+               " order_id TEXT, status TEXT NOT NULL DEFAULT 'open', exit_price REAL, exit_fee REAL, exit_ts REAL,"
+               " exit_reason TEXT, pnl REAL)")
+    db.commit()
+    db.close()
+    j = Journal(path)
+    pid = j.open_position(mode="paper", ticker="X", series="S", event_ticker="E", side="yes", count=1,
+                          entry_price=0.4, entry_fee=0.02, close_ts=T0, p_win=0.5, edge=0.05, take_profit=0.52,
+                          stop_price=0.2)
+    assert j.get(pid).take_profit == 0.52

@@ -1,6 +1,7 @@
-"""Turn Kalshi markets + BTC price into UP/DOWN calls, and decide exits."""
+"""Turn Kalshi markets + BTC price into UP/DOWN calls with entry, take-profit and stop prices."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -93,28 +94,72 @@ def direction(strike_type: str, side: str) -> str:
     return "IN RANGE" if side == "yes" else "OUT OF RANGE"
 
 
+# --- trade plan prices (whole cents: valid ticks on every Kalshi BTC market) -----------
+def max_entry_price(p_cons: float, count: int, cfg) -> float:
+    """Highest price that still clears MIN_EDGE after fees ("buy at or below")."""
+    n = max(1, int(count))
+    for c in range(99, 0, -1):
+        p = c / 100
+        if p_cons - p - taker_fee(p, n, cfg.taker_fee_rate) / n >= cfg.min_edge - 1e-9:
+            return p
+    return 0.0
+
+
+def take_profit_price(fair_side: float, count: int, cfg) -> float | None:
+    """Lowest price where selling beats the bot's fair value after the sell fee.
+
+    That's the point where Kalshi has caught up with the bot, so the edge is used up.
+    None when fair value is so close to $1 that holding to settlement is the plan.
+    """
+    n = max(1, int(count))
+    for c in range(max(1, math.ceil(round((fair_side + 0.01) * 100, 6))), 100):
+        p = c / 100
+        if p - taker_fee(p, n, cfg.taker_fee_rate) / n > fair_side + 0.01 - 1e-9:
+            return p
+    return None
+
+
+def stop_price(entry: float, cfg) -> float | None:
+    if cfg.stop_loss_pct <= 0:
+        return None
+    return max(0.01, math.floor(round(entry * (1.0 - cfg.stop_loss_pct) * 100, 6)) / 100)
+
+
 @dataclass
 class Signal:
     quote: Quote
     side: str          # "yes" or "no"
-    price: float       # ask we'd pay for that side
+    price: float       # ask we'd pay for that side right now
     p_win: float       # blended fair probability this side wins
     p_cons: float      # worst case across vol scenarios
     edge: float        # p_cons - price - fee per contract
     t_rem: float
     fair_yes: float
+    max_entry: float = 0.0
+    take_profit: float | None = None
+    stop: float | None = None
 
     @property
     def direction(self) -> str:
         return direction(self.quote.strike_type, self.side)
 
+    def plan(self, count: int, cfg) -> "Signal":
+        """Fill in entry / take-profit / stop for a `count`-contract trade."""
+        self.edge = self.p_cons - self.price - taker_fee(self.price, count, cfg.taker_fee_rate) / count
+        self.max_entry = max(max_entry_price(self.p_cons, count, cfg), self.price)
+        self.take_profit = take_profit_price(self.p_win, count, cfg)
+        self.stop = stop_price(self.price, cfg)
+        return self
+
     def text(self, count: int | None = None) -> str:
         q = self.quote
-        mins = max(self.t_rem, 0) / 60.0
         size = f"{count}x " if count else ""
-        return (f"BUY {self.direction} ({self.side.upper()}) {size}@ ${self.price:.3f} on {q.ticker} [{q.label}] "
-                f"- bot fair {self.p_win:.3f} (worst case {self.p_cons:.3f}), "
-                f"edge +{self.edge * 100:.1f}c/contract after fees, closes in {mins:.0f} min")
+        tp = f"sell at ${self.take_profit:.2f}" if self.take_profit else "none, hold to settlement"
+        stop = f" | stop: ${self.stop:.2f}" if self.stop else ""
+        return (f"BUY {self.direction} ({self.side.upper()}) {size}on {q.ticker} [{q.label}] | "
+                f"entry: buy at or below ${self.max_entry:.2f} (ask now ${self.price:.3f}) | "
+                f"take profit: {tp}{stop} | bot fair ${self.p_win:.3f}, edge +{self.edge * 100:.1f}c after fees | "
+                f"closes in {max(self.t_rem, 0) / 60:.0f} min")
 
 
 def evaluate(q: Quote, spot: float, sigma: float, now: float, cfg,
@@ -138,29 +183,38 @@ def evaluate(q: Quote, spot: float, sigma: float, now: float, cfg,
             continue
         p_win = mix if side == "yes" else 1.0 - mix
         p_cons = lo if side == "yes" else 1.0 - hi
-        n_ref = max(1, int(cfg.max_trade_dollars // price))
-        edge = p_cons - price - taker_fee(price, n_ref, cfg.taker_fee_rate) / n_ref
-        if edge >= cfg.min_edge:
-            out.append(Signal(q, side, price, p_win, p_cons, edge, t_rem, mix))
+        sig = Signal(q, side, price, p_win, p_cons, 0.0, t_rem, mix)
+        sig.plan(max(1, int(cfg.max_trade_dollars // price)), cfg)
+        if sig.edge >= cfg.min_edge:
+            out.append(sig)
     return out, fy
 
 
-def exit_decision(entry_price: float, bid: float, fair_side: float, t_rem: float,
-                  count: float, cfg) -> str | None:
+def exit_decision(entry_price: float, bid: float, fair_side: float, t_rem: float, count: float, cfg,
+                  take_profit: float | None = None, stop: float | None = None) -> str | None:
     """Should an open position be sold now at `bid`?
 
-    edge exit  : the bid (after the sell fee) pays more than the bot thinks the
-                 contract is worth. Locks in profit, or cuts a bet the model
-                 no longer likes. Always positive expected value.
-    stop loss  : the bid fell STOP_LOSS_PCT below entry. Caps the loss, but on
-                 a binary contract it often sells near the bottom. Set
-                 STOP_LOSS_PCT=0 to hold to settlement instead.
+    EXIT_STYLE=target (default): sell when the bid reaches the take-profit price set
+        at entry - the same price the alert told you to rest a limit sell at.
+    EXIT_STYLE=dynamic: sell whenever the bid (after the sell fee) pays more than the
+        bot's *current* fair value. Needs the bot watching; you can't copy it by hand.
+    Stop loss (both styles): sell if the bid falls to the stop price (STOP_LOSS_PCT
+        below entry). On a binary contract this often sells near the bottom.
+        Kalshi has no stop orders, so by hand you have to watch for it.
     """
-    if bid <= 0 or t_rem < 20 or count <= 0:
+    if bid <= 0 or count <= 0:
         return None
-    proceeds = bid - taker_fee(bid, count, cfg.taker_fee_rate) / count
-    if cfg.edge_exit and proceeds > fair_side + 0.01:
-        return "take_profit" if proceeds > entry_price else "model_exit"
-    if cfg.stop_loss_pct > 0 and bid <= entry_price * (1.0 - cfg.stop_loss_pct):
+    if cfg.exit_style == "target":
+        if take_profit is not None and bid >= take_profit - 1e-9:
+            return "take_profit"
+    elif cfg.edge_exit and t_rem >= 20:
+        proceeds = bid - taker_fee(bid, count, cfg.taker_fee_rate) / count
+        if proceeds > fair_side + 0.01:
+            return "take_profit" if proceeds > entry_price else "model_exit"
+    if t_rem < 20:  # last seconds: the settlement average is mostly locked in, don't dump
+        return None
+    if stop is None and cfg.stop_loss_pct > 0:
+        stop = entry_price * (1.0 - cfg.stop_loss_pct)
+    if stop is not None and bid <= stop + 1e-9:
         return "stop_loss"
     return None

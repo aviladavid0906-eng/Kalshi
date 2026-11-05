@@ -25,7 +25,7 @@ from .model import clamp_sigma, taker_fee
 from .report import Stats, brier, money, trade_stats, verdict
 from .risk import size_for
 from .spot import coinbase_candles
-from .strategy import direction, evaluate, exit_decision, iso_to_ts, parse_quote
+from .strategy import evaluate, exit_decision, iso_to_ts, parse_quote
 
 
 @dataclass
@@ -84,6 +84,15 @@ def _price_near(px_at: dict[int, float], ts: float) -> float | None:
     return None
 
 
+def _bid_high(c: dict, side: str) -> float | None:
+    """Best bid reached during the minute (what a resting sell order could have hit)."""
+    if side == "yes":
+        v = num((c.get("yes_bid") or {}).get("high_dollars"))
+        return v if v is not None and 0 < v < 1 else None
+    v = num((c.get("yes_ask") or {}).get("low_dollars"))  # NO bid = 1 - YES ask
+    return round(1 - v, 4) if v is not None and 0 < v < 1 else None
+
+
 def simulate_market(q0, candles, outcome: int, px_at, sig_at, cfg, lag_min: int = 0,
                     obs: list | None = None) -> SimTrade | None:
     """One market, at most one trade, same rules as the live bot."""
@@ -91,6 +100,14 @@ def simulate_market(q0, candles, outcome: int, px_at, sig_at, cfg, lag_min: int 
     for c in candles:
         e = int(c["end_period_ts"])
         t_rem = q0.close_ts - e
+        if pos is not None and cfg.exit_style == "target":
+            best, n, fee, t_entry = pos
+            hi = _bid_high(c, best.side)
+            if best.take_profit is not None and hi is not None and hi >= best.take_profit - 1e-9:
+                # the resting take-profit order fills at its limit price
+                return SimTrade(q0.ticker, q0.series, best.side, best.direction, n, best.price, fee,
+                                best.take_profit, taker_fee(best.take_profit, n, cfg.taker_fee_rate),
+                                "take_profit", t_entry, best.edge)
         if t_rem < 60:
             continue
         spot, sigma = px_at.get(e - 60 * lag_min), sig_at.get(e - 60 * lag_min)
@@ -111,24 +128,24 @@ def simulate_market(q0, candles, outcome: int, px_at, sig_at, cfg, lag_min: int 
             n = size_for(best, cfg.max_trade_dollars, cfg.bankroll, cfg)
             if n < 1:
                 continue
-            fee = taker_fee(best.price, n, cfg.taker_fee_rate)
-            edge_n = best.p_cons - best.price - fee / n
-            if edge_n >= cfg.min_edge:
-                pos = (best, n, fee, edge_n, t_rem)
+            best.plan(n, cfg)
+            if best.edge >= cfg.min_edge:
+                pos = (best, n, taker_fee(best.price, n, cfg.taker_fee_rate), t_rem)
             continue
-        best, n, fee, edge_n, t_entry = pos
+        best, n, fee, t_entry = pos
         fair_side = fy[0] if best.side == "yes" else 1.0 - fy[0]
         bid = q.bid(best.side)
-        reason = exit_decision(best.price, bid, fair_side, t_rem, n, cfg)
+        reason = exit_decision(best.price, bid, fair_side, t_rem, n, cfg,
+                               take_profit=best.take_profit, stop=best.stop)
         if reason:
-            return SimTrade(q0.ticker, q0.series, best.side, direction(q0.strike_type, best.side), n,
-                            best.price, fee, bid, taker_fee(bid, n, cfg.taker_fee_rate), reason, t_entry, edge_n)
+            return SimTrade(q0.ticker, q0.series, best.side, best.direction, n, best.price, fee,
+                            bid, taker_fee(bid, n, cfg.taker_fee_rate), reason, t_entry, best.edge)
     if pos is None:
         return None
-    best, n, fee, edge_n, t_entry = pos
+    best, n, fee, t_entry = pos
     won = (outcome == 1) == (best.side == "yes")
-    return SimTrade(q0.ticker, q0.series, best.side, direction(q0.strike_type, best.side), n, best.price, fee,
-                    1.0 if won else 0.0, 0.0, "settled_win" if won else "settled_loss", t_entry, edge_n)
+    return SimTrade(q0.ticker, q0.series, best.side, best.direction, n, best.price, fee,
+                    1.0 if won else 0.0, 0.0, "settled_win" if won else "settled_loss", t_entry, best.edge)
 
 
 def _line(name: str, s: Stats) -> str:
@@ -219,7 +236,6 @@ def run_backtest(cfg, series=("KXBTC15M", "KXBTCD"), days: float = 3.0, *, clien
 
     obs: list = []
     trades = simulate(cfg, obs)
-    hold = simulate(replace(cfg, edge_exit=False, stop_loss_pct=0.0))
     st = trade_stats(trades)
     b_bot = brier((p, o) for p, _, o in obs)
     b_mkt = brier((m, o) for _, m, o in obs)
@@ -227,8 +243,13 @@ def run_backtest(cfg, series=("KXBTC15M", "KXBTCD"), days: float = 3.0, *, clien
     out("")
     out(f"BACKTEST - last {days:g} days | {len(loaded)} markets replayed | min edge {cfg.min_edge * 100:.0f}c | "
         f"${cfg.max_trade_dollars:g} max per trade")
-    out(_line("Your settings", st))
-    out(_line("Hold to settlement", trade_stats(hold)))
+    out(_line(f"Your settings ({cfg.exit_style})", st))
+    out("  Exit styles on the same entries:")
+    for name, c in (("Follow the calls: TP+stop", replace(cfg, exit_style="target")),
+                    ("Entry + TP, no stop", replace(cfg, exit_style="target", stop_loss_pct=0.0)),
+                    ("Fair-value exits + stop", replace(cfg, exit_style="dynamic", edge_exit=True)),
+                    ("Hold to settlement", replace(cfg, exit_style="dynamic", edge_exit=False, stop_loss_pct=0.0))):
+        out(_line(f"    {name}", trade_stats(simulate(c))))
     for s in series:
         out(_line(f"  {s}", trade_stats([t for t in trades if t.series == s])))
     for d in sorted({t.direction for t in trades}):

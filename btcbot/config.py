@@ -67,7 +67,8 @@ class Settings:
 
     # --- exits --------------------------------------------------------------
     stop_loss_pct: float = 0.50          # sell if the bid falls this far below entry (0 = off)
-    edge_exit: bool = True               # sell when the bid pays more than the bot's fair value
+    exit_style: str = "target"           # target = fixed take-profit set at entry; dynamic = follow fair value
+    edge_exit: bool = True               # dynamic style only: sell when the bid beats current fair value
 
     # --- model --------------------------------------------------------------
     poll_seconds: float = 10.0
@@ -101,6 +102,7 @@ class Settings:
                 continue
             setattr(s, f.name, _coerce(getattr(s, f.name), raw))
         s.mode = s.mode.lower()
+        s.exit_style = s.exit_style.lower()
         s.series = tuple(x.upper() for x in s.series)
         s.validate()
         return s
@@ -118,6 +120,10 @@ class Settings:
                 problems.append(f"{name.upper()} must be > 0")
         if self.max_trade_dollars > self.max_open_dollars:
             problems.append("MAX_TRADE_DOLLARS cannot exceed MAX_OPEN_DOLLARS")
+        if self.min_edge < 0:
+            problems.append("MIN_EDGE must be >= 0 (a negative edge means a losing bet by the bot's own math)")
+        if self.exit_style not in ("target", "dynamic"):
+            problems.append("EXIT_STYLE must be target or dynamic")
         if not 0 <= self.stop_loss_pct < 1:
             problems.append("STOP_LOSS_PCT must be in [0, 1)")
         if problems:

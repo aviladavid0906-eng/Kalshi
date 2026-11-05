@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import datetime
 
 from .config import Settings
+from .risk import size_for
 
 SHORT = {"KXBTC15M": "15m", "KXBTCD": "hourly", "KXBTC": "range"}
 
@@ -36,11 +37,19 @@ def cmd_scan(cfg: Settings, args) -> None:
         name = f"{SHORT.get(q.series, q.series)} {datetime.fromtimestamp(q.close_ts):%H:%M} {q.label}"[:44]
         if r["signals"]:
             s = max(r["signals"], key=lambda x: x.edge)
-            call = f"BUY {s.direction} ({s.side.upper()}) @ {s.price:.3f}  edge +{s.edge * 100:.1f}c"
+            n = size_for(s, cfg.max_trade_dollars, cfg.bankroll, cfg)
+            if n >= 1:
+                s.plan(n, cfg)
+            tp = f"TP {s.take_profit:.2f}" if s.take_profit else "TP none (hold)"
+            stop = f" | stop {s.stop:.2f}" if s.stop else ""
+            call = (f"BUY {s.direction} ({s.side.upper()}) at <= {s.max_entry:.2f} | {tp}{stop} | "
+                    f"{max(n, 1)}x (${max(n, 1) * s.price:.2f}) | edge +{s.edge * 100:.1f}c")
         else:
             call = f"pass (best edge {r['best_raw'] * 100:+.1f}c)"
         print(f"{name:<44} {_dur(r['t_rem']):>7} {q.yes_bid:>6.3f} {q.yes_ask:>6.3f} {r['fair']:>6.3f}  {call}")
     print("BOT = bot's fair YES price. Edge = worst-case win chance minus price minus fees, per $1 contract.")
+    print("To trade a call by hand: buy at or below the entry price, then rest a limit SELL at the TP price.")
+    print("Kalshi has no stop orders: if the bid falls to the stop, sell by hand (`run` alerts you).")
 
 
 def cmd_run(cfg: Settings, args) -> None:

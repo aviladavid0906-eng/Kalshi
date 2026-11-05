@@ -193,16 +193,20 @@ class Bot:
             fair = evals[pos.ticker][1][0]
             fair_side = fair if pos.side == "yes" else 1.0 - fair
             bid = q.bid(pos.side)
-            reason = exit_decision(pos.entry_price, bid, fair_side, q.close_ts - now, pos.count, self.cfg)
+            reason = exit_decision(pos.entry_price, bid, fair_side, q.close_ts - now, pos.count, self.cfg,
+                                   take_profit=pos.take_profit, stop=pos.stop_price)
             if not reason:
                 continue
-            pnl = self.broker.sell(pos, bid, reason, now)
+            resting_tp = reason == "take_profit" and self.cfg.exit_style == "target" and pos.take_profit
+            price = pos.take_profit if resting_tp else bid
+            pnl = self.broker.sell(pos, price, reason, now, at_limit=bool(resting_tp))
             if pnl is not None:
                 n += 1
                 sold = self.journal.closed_positions(self.mode, since=now)[-1]
-                self.notify(f"SOLD ({reason.replace('_', ' ')})",
-                            f"{sold.count:g}x {pos.side.upper()} {pos.ticker} @ ${sold.exit_price:.3f} "
-                            f"(bought @ ${pos.entry_price:.3f}) | P&L {pnl:+.2f} [{self.mode}]")
+                title = {"take_profit": "TAKE PROFIT HIT", "stop_loss": "STOP HIT - sell now",
+                         "model_exit": "MODEL EXIT - sell now"}.get(reason, reason)
+                self.notify(title, f"{sold.count:g}x {pos.side.upper()} {pos.ticker} sold @ ${sold.exit_price:.3f} "
+                                   f"(bought @ ${pos.entry_price:.3f}) | P&L {pnl:+.2f} [{self.mode}]")
         return n
 
     def _enter(self, quotes, evals, now) -> int:
@@ -229,17 +233,17 @@ class Bot:
             n = self.risk.size(sig, cash=self.broker.cash(), equity=self.broker.equity(), now=now)
             if n < 1:
                 continue
-            sig.edge = sig.p_cons - sig.price - taker_fee(sig.price, n, self.cfg.taker_fee_rate) / n
+            sig.plan(n, self.cfg)
             if sig.edge < self.cfg.min_edge:
                 continue
             pid = self.broker.buy(sig, n, now)
             if pid is None:
-                self.notify(f"SIGNAL {sig.direction} (not filled)", sig.text(n))
+                self.notify(f"CALL {sig.direction} (price moved before the {self.mode} fill)", sig.text(n))
                 continue
             pos = self.journal.get(pid)
-            self.notify(f"BOUGHT {sig.direction}",
-                        f"{sig.text(int(pos.count))} | filled @ ${pos.entry_price:.3f}, "
-                        f"cost ${pos.cost:.2f} incl. fees [{self.mode}]")
+            self.notify(f"CALL {sig.direction}",
+                        f"{sig.text(int(pos.count))} | {self.mode}: bought {pos.count:g}x @ ${pos.entry_price:.3f}, "
+                        f"cost ${pos.cost:.2f} incl. fees")
             used_events.add(sig.quote.event_ticker)
             opened += 1
             if opened >= 2:
