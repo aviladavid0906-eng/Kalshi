@@ -67,8 +67,8 @@ class Settings:
 
     # --- exits --------------------------------------------------------------
     stop_loss_pct: float = 0.50          # sell if the bid falls this far below entry (0 = off)
-    tp_up_pct: float = 0.60              # UP bets: take profit at +60% over what you paid (0 = fair-value target)
-    tp_down_pct: float = 0.40            # DOWN bets: take profit at +40% over what you paid
+    tp_up_pct: float = 0.50              # UP bets: take profit at +50% over what you paid (0 = fair-value target)
+    tp_down_pct: float = 0.50            # DOWN bets: take profit at +50% over what you paid
     exit_style: str = "target"           # target = fixed take-profit set at entry; dynamic = follow fair value
     edge_exit: bool = True               # dynamic style only: sell when the bid beats current fair value
 
