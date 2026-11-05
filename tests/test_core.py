@@ -159,7 +159,7 @@ def test_evaluate_flags_cheap_yes_and_passes_fair_price():
 
 
 def test_exit_rules_dynamic():
-    c = cfg(exit_style="dynamic")
+    c = cfg(exit_style="dynamic", stop_loss_pct=0.5)
     assert exit_decision(0.40, 0.70, 0.60, 300, 5, c) == "take_profit"     # bid pays more than fair
     assert exit_decision(0.40, 0.18, 0.30, 300, 5, c) == "stop_loss"       # down 55%
     assert exit_decision(0.40, 0.35, 0.45, 300, 5, c) is None              # still worth holding
@@ -168,13 +168,20 @@ def test_exit_rules_dynamic():
 
 
 def test_exit_rules_target():
-    c = cfg()  # default: fixed take-profit set at entry
-    assert c.exit_style == "target"
+    c = cfg(exit_style="target", stop_loss_pct=0.5)
     assert exit_decision(0.31, 0.59, 0.50, 300, 2, c, take_profit=0.59, stop=0.15) == "take_profit"
     assert exit_decision(0.31, 0.59, 0.50, 5, 2, c, take_profit=0.59, stop=0.15) == "take_profit"  # resting order
     assert exit_decision(0.31, 0.58, 0.70, 300, 2, c, take_profit=0.59, stop=0.15) is None   # not there yet
     assert exit_decision(0.31, 0.15, 0.20, 300, 2, c, take_profit=0.59, stop=0.15) == "stop_loss"
-    assert exit_decision(0.31, 0.15, 0.20, 300, 2, cfg(stop_loss_pct=0.0), take_profit=0.59) is None
+    assert exit_decision(0.31, 0.15, 0.20, 300, 2, cfg(exit_style="target"), take_profit=0.59) is None
+
+
+def test_exit_rules_hold_default():
+    c = cfg()
+    assert (c.exit_style, c.stop_loss_pct, c.series) == ("hold", 0.0, ("KXBTC15M",))
+    assert exit_decision(0.31, 0.99, 0.50, 300, 2, c, take_profit=0.47) is None   # never sells early
+    assert exit_decision(0.31, 0.05, 0.10, 300, 2, c) is None                      # no stop
+    assert exit_decision(0.31, 0.05, 0.10, 300, 2, cfg(stop_loss_pct=0.5)) == "stop_loss"
     assert exit_decision(0.31, 0.90, 0.95, 300, 2, c, take_profit=None, stop=0.15) is None   # plan: hold
 
 
@@ -189,14 +196,17 @@ def test_trade_plan_prices():
     tp = take_profit_price(0.565, 2, c)
     assert tp == 0.6 and tp - taker_fee(tp, 2) / 2 > 0.575
     assert take_profit_price(0.99, 2, c) is None          # nothing left to take: hold
-    assert stop_price(0.31, c) == 0.15 and stop_price(0.31, cfg(stop_loss_pct=0.0)) is None
+    assert stop_price(0.31, cfg(stop_loss_pct=0.5)) == 0.15 and stop_price(0.31, c) is None
 
 
 def test_signal_text_shows_the_plan():
     q = parse_quote(MARKET, "KXBTC15M")
-    sigs, _ = evaluate(q, 100_000, SIG, q.close_ts - 600, cfg())
+    sigs, _ = evaluate(q, 100_000, SIG, q.close_ts - 600, cfg(exit_style="target", stop_loss_pct=0.5))
     t = sigs[0].text(3)
     assert "entry: buy at or below $" in t and "take profit: sell at $" in t and "stop: $" in t
+    held = evaluate(q, 100_000, SIG, q.close_ts - 600, cfg())[0][0]
+    assert held.take_profit is None and "take profit: none, hold to settlement" in held.text(3)
+    assert "stop:" not in held.text(3)
     assert sigs[0].max_entry >= sigs[0].price and sigs[0].take_profit > sigs[0].price
 
 
@@ -212,14 +222,15 @@ def test_settings_coercion_and_validation(monkeypatch):
 
 def test_percent_take_profits():
     from btcbot.strategy import take_profit_for, take_profit_price
-    c = cfg()
+    c = cfg(exit_style="target")
     assert (c.tp_up_pct, c.tp_down_pct) == (0.50, 0.50)
+    assert take_profit_for("UP", 0.30, 0.5, 2, cfg()) is None   # default style holds to settlement
     assert take_profit_for("UP", 0.30, 0.5, 2, c) == 0.45       # +50%
     assert take_profit_for("DOWN", 0.48, 0.5, 2, c) == 0.72     # today's bet: 48c -> 72c
     assert take_profit_for("UP", 0.31, 0.5, 2, c) == 0.47       # 0.465 rounds up to the cent
     assert take_profit_for("UP", 0.67, 0.9, 2, c) is None       # $1.005 is impossible: hold
-    assert take_profit_for("DOWN", 0.30, 0.5, 2, cfg(tp_down_pct=0.4)) == 0.42
-    assert take_profit_for("UP", 0.30, 0.5, 2, cfg(tp_up_pct=0.0)) == take_profit_price(0.5, 2, c)
+    assert take_profit_for("DOWN", 0.30, 0.5, 2, cfg(exit_style="target", tp_down_pct=0.4)) == 0.42
+    assert take_profit_for("UP", 0.30, 0.5, 2, cfg(exit_style="target", tp_up_pct=0.0)) == take_profit_price(0.5, 2, c)
     assert take_profit_for("IN RANGE", 0.30, 0.5, 2, c) == take_profit_price(0.5, 2, c)
     q = parse_quote(MARKET, "KXBTC15M")
     sig = evaluate(q, 100_000, SIG, q.close_ts - 600, c)[0][0]

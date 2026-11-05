@@ -1,4 +1,5 @@
 import math
+from dataclasses import replace
 
 from btcbot.backtest import _batches, rolling_sigma, simulate_market
 from btcbot.config import Settings
@@ -61,7 +62,7 @@ def test_rolling_sigma_warms_up():
 
 
 def test_target_take_profit_fills_on_the_minute_high():
-    cfg = Settings()
+    cfg = replace(Settings(), exit_style="target")
     sig = 0.5 / math.sqrt(SECONDS_PER_YEAR)
     ends = [CLOSE - 60 * k for k in range(14, 0, -1)]
     cs = [candle(e, 0.30, 0.31) for e in ends]

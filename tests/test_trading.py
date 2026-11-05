@@ -68,7 +68,7 @@ def test_close_time_fixture_matches():
 
 
 def test_paper_bot_buys_mispriced_up_then_settles(tmp_path):
-    bot, msgs = make_bot(tmp_path)
+    bot, msgs = make_bot(tmp_path, exit_style="target", stop_loss_pct=0.5)
     s = bot.step(now=T0)
     assert s["entries"] == 1
     pos = bot.journal.open_positions("paper")[0]
@@ -88,7 +88,7 @@ def test_paper_bot_buys_mispriced_up_then_settles(tmp_path):
 
 
 def test_take_profit_when_market_overshoots(tmp_path):
-    bot, msgs = make_bot(tmp_path)
+    bot, msgs = make_bot(tmp_path, exit_style="target")
     bot.step(now=T0)
     bot.client.bid, bot.client.ask = 0.80, 0.81   # fair is ~0.5, bid now 0.80
     assert bot.step(now=T0 + 10)["exits"] == 1
@@ -246,3 +246,15 @@ def test_old_database_gets_new_columns(tmp_path):
                           entry_price=0.4, entry_fee=0.02, close_ts=T0, p_win=0.5, edge=0.05, take_profit=0.52,
                           stop_price=0.2)
     assert j.get(pid).take_profit == 0.52
+
+
+def test_default_bot_holds_to_settlement(tmp_path):
+    bot, msgs = make_bot(tmp_path)
+    bot.step(now=T0)
+    bot.client.bid, bot.client.ask = 0.80, 0.81      # big move in our favour: still holds
+    assert bot.step(now=T0 + 10)["exits"] == 0
+    bot.client.bid, bot.client.ask = 0.02, 0.03      # big move against: still holds (no stop)
+    assert bot.step(now=T0 + 20)["exits"] == 0
+    bot.client.result = "no"
+    bot.step(now=CLOSE + 60)
+    assert bot.journal.closed_positions("paper")[0].exit_reason == "settled_loss"

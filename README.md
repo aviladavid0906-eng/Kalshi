@@ -12,12 +12,14 @@ Works out what each Kalshi bitcoin contract is really worth, calls **UP** or **D
 - **Only bets on clear mispricings.** Edge = worst-case win chance (under both low- and high-volatility assumptions) − price − Kalshi fee. It must be ≥ `MIN_EDGE` (default 4¢ per $1 contract).
 - **UP** = YES on "above $X" / "up in 15 min"; **DOWN** = NO on the same market.
 - **Live prices only.** Every decision uses the live order book. Kalshi's market list can lag the book by 10+ seconds, so the bot never trades on it.
-- **Every call is a trade plan**: entry, take-profit and stop, plus a size for your balance.
+- **Every call is a trade plan:** an entry price, an exit plan and a size for your balance.
   - *Entry:* buy at or below this price. Above it, the edge is gone after fees.
-  - *Take profit:* sell at +50% over what you paid, for both UP and DOWN bets (`TP_UP_PCT`, `TP_DOWN_PCT`). Rest a limit sell there right after you buy. If the target would be $1 or more, hold to settlement. Set a % to 0 to use the bot's fair-value target instead.
-  - *Stop:* `STOP_LOSS_PCT` below entry (default 50%). Kalshi has no stop orders, so `run` alerts you to sell by hand. `STOP_LOSS_PCT=0` turns it off.
-  - If neither is hit, the contract settles at $1 or $0.
-  - The paper bot follows the same fixed plan (`EXIT_STYLE=target`), so paper results match following the alerts. `EXIT_STYLE=dynamic` instead sells whenever the bid beats the bot's *current* fair value; you can't copy that by hand.
+  - *Exit (default `EXIT_STYLE=hold`):* hold until it settles at $1 or $0. That lost the least in both test periods.
+  - *Other exit styles:*
+    - `EXIT_STYLE=target`: a fixed take-profit (`TP_UP_PCT` / `TP_DOWN_PCT`, e.g. 0.50 = +50% over what you paid).
+    - `EXIT_STYLE=dynamic`: sell when the bid beats the bot's current fair value.
+    - Either can add a stop with `STOP_LOSS_PCT` (e.g. 0.50). Kalshi has no stop orders, so `run` alerts you to sell by hand.
+- **Watches the 15-minute markets only** (`SERIES=KXBTC15M`). The hourly markets lost more in testing; add `KXBTCD` to watch them anyway.
 - **Limits that hold no matter what the model says**
   - Per trade (`MAX_TRADE_DOLLARS`, $5), total open (`MAX_OPEN_DOLLARS`, $15).
   - Daily loss (`MAX_DAILY_LOSS_DOLLARS`, $10). Open positions count as already lost, so the day can't go past the limit.
@@ -34,7 +36,7 @@ Works out what each Kalshi bitcoin contract is really worth, calls **UP** or **D
 6. `python -m btcbot report`: P&L for today, the week and the month, shown in hours of work, plus the go/no-go verdict.
 
 **Example alert:**
-`CALL DOWN: BUY DOWN (NO) 2x on KXBTC15M-26NOV051530-30 [Target Price: $75,971.55] | entry: buy at or below $0.35 (ask now $0.310) | take profit: sell at $0.60 | stop: $0.15 | bot fair $0.565, edge +4.6c after fees | closes in 3 min`
+`CALL DOWN: BUY DOWN (NO) 2x on KXBTC15M-26NOV051530-30 [Target Price: $75,971.55] | entry: buy at or below $0.35 (ask now $0.310) | take profit: none, hold to settlement | bot fair $0.565, edge +4.6c after fees | closes in 3 min`
 
 Phone alerts: install the free **ntfy** app, subscribe to a long random topic name, and set `NTFY_TOPIC` to the same name in `.env`.
 
@@ -54,24 +56,19 @@ Phone alerts: install the free **ntfy** app, subscribe to a long random topic na
 | `python -m btcbot check` | Test your API key (demo/live) |
 
 ## Backtest results
-Run on 2026-11-05 over the previous 3 days: 1,307 real settled markets, default entry rules ($100 bankroll, $5 max per trade, 4¢ minimum edge). These are the same 123 entries under each exit rule:
+Default entry rules ($100 bankroll, $5 max per trade, 4¢ minimum edge), 15-minute markets. Each period uses the same entries under every exit rule, after fees.
 
-| Exit rule | P&L | Per $1 bet | t |
-|---|---|---|---|
-| **+50% take-profit + stop** (default) | −$19.49 | −19¢ | −2.9 |
-| +50% take-profit, no stop | −$29.33 | −29¢ | −3.6 |
-| UP +60% / DOWN +40% take-profit + stop | −$17.27 | −17¢ | −2.7 |
-| UP +60% / DOWN +40%, no stop | −$23.49 | −23¢ | −3.0 |
-| Fair-value take-profit + stop (`TP_UP_PCT=0 TP_DOWN_PCT=0`) | −$16.07 | −16¢ | −2.5 |
-| Bot manages exits + stop (`EXIT_STYLE=dynamic`) | −$9.52 | −10¢ | −0.8 |
-| Hold to settlement | −$15.02 | −15¢ | −1.0 |
+| Exit rule | Nov 2–5 (39 trades) | Oct 30–Nov 2, unseen during tuning (156 trades) |
+|---|---|---|
+| **Hold to settlement** (default) | −9¢ per $1 | −13¢ per $1 (−$21.97) |
+| Bot manages exits, no stop | −6¢ | −16¢ (−$25.67) |
+| Bot manages exits + 50% stop | −8¢ | −23¢ (−$38.44) |
+| Take-profit +50% + 50% stop | −10¢ | −20¢ (−$32.47) |
 
-- **Every exit rule loses.** A t of −2.5 or lower means the loss is very unlikely to be bad luck.
-- **The take-profit level barely matters.** Every level from +20% to +200% lost 15–19¢ per $1. The entries are the problem, and an exit rule can't fix a bad entry.
-- **15-minute markets lost far less than hourly ones:** −6¢ vs −24¢ per $1 under the default rule. They still lost.
+- **Every rule lost in both periods.** The best rule in one period was among the worst in the other. Choosing a rule from one period's results is just fitting to noise.
+- **Hourly markets were worse:** −10¢ to −25¢ per $1 over Nov 2–5 (84 trades), depending on the exit rule.
 - **Kalshi's prices predicted outcomes better than the bot** (Brier 0.1329 vs 0.1364 over 35,203 one-minute snapshots).
-- **Bigger minimum edges looked better but prove nothing:** 8¢ gave +2.8% on 23 trades and 12¢ gave +27% on 8 trades. Both are too few to trust.
-- **Verdict: NO EDGE. Don't fund it.**
+- **Verdict: NO EDGE. Don't fund it.** Live trading stays locked until a paper record of 50+ trades is profitable with t ≥ 2.
 
 ## Other methods tested (2026-11-05, same 3 days)
 - **Buying cheap contracts loses.** Hourly-market contracts priced 3–40¢, bought 15–60 minutes before close, lost 2–5¢ per $1 after fees (t as low as −3.0). The bot's average buy (31¢) sat right in this zone.

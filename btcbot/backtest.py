@@ -245,10 +245,14 @@ def run_backtest(cfg, series=("KXBTC15M", "KXBTCD"), days: float = 3.0, *, clien
         f"${cfg.max_trade_dollars:g} max per trade")
     out(_line(f"Your settings ({cfg.exit_style})", st))
     out("  Exit styles on the same entries:")
-    for name, c in (("Follow the calls: TP+stop", replace(cfg, exit_style="target")),
-                    ("Entry + TP, no stop", replace(cfg, exit_style="target", stop_loss_pct=0.0)),
-                    ("Fair-value exits + stop", replace(cfg, exit_style="dynamic", edge_exit=True)),
-                    ("Hold to settlement", replace(cfg, exit_style="dynamic", edge_exit=False, stop_loss_pct=0.0))):
+    for name, c in (("Hold to settlement", replace(cfg, exit_style="hold", stop_loss_pct=0.0)),
+                    ("TP +50% + 50% stop", replace(cfg, exit_style="target", tp_up_pct=0.5, tp_down_pct=0.5,
+                                                   stop_loss_pct=0.5)),
+                    ("TP UP+60%/DOWN+40% + stop", replace(cfg, exit_style="target", tp_up_pct=0.6,
+                                                          tp_down_pct=0.4, stop_loss_pct=0.5)),
+                    ("Fair-value exits + stop", replace(cfg, exit_style="dynamic", edge_exit=True, stop_loss_pct=0.5)),
+                    ("Fair-value exits, no stop", replace(cfg, exit_style="dynamic", edge_exit=True,
+                                                          stop_loss_pct=0.0))):
         out(_line(f"    {name}", trade_stats(simulate(c))))
     for s in series:
         out(_line(f"  {s}", trade_stats([t for t in trades if t.series == s])))

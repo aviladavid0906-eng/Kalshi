@@ -127,6 +127,8 @@ def take_profit_for(direction_label: str, entry: float, fair_side: float, count:
     the target is $1 or more, there is nothing to take: hold to settlement.
     A percentage of 0 (and range markets) use the fair-value target instead.
     """
+    if cfg.exit_style == "hold":
+        return None
     pct = {"UP": cfg.tp_up_pct, "DOWN": cfg.tp_down_pct}.get(direction_label, 0.0)
     if pct > 0:
         tp = math.ceil(round(entry * (1.0 + pct) * 100, 6)) / 100
@@ -135,6 +137,8 @@ def take_profit_for(direction_label: str, entry: float, fair_side: float, count:
 
 
 def tp_rule(direction_label: str, cfg) -> str:
+    if cfg.exit_style == "hold":
+        return "hold to settlement"
     pct = {"UP": cfg.tp_up_pct, "DOWN": cfg.tp_down_pct}.get(direction_label, 0.0)
     return f"+{pct:.0%} rule" if pct > 0 else "fair value"
 
@@ -176,8 +180,12 @@ class Signal:
     def text(self, count: int | None = None) -> str:
         q = self.quote
         size = f"{count}x " if count else ""
-        tp = (f"sell at ${self.take_profit:.2f} ({self.tp_note})" if self.take_profit
-              else "none, hold to settlement (target would be $1+)")
+        if self.take_profit:
+            tp = f"sell at ${self.take_profit:.2f} ({self.tp_note})"
+        elif self.tp_note == "hold to settlement":
+            tp = "none, hold to settlement"
+        else:
+            tp = "none, hold to settlement (target would be $1+)"
         stop = f" | stop: ${self.stop:.2f}" if self.stop else ""
         return (f"BUY {self.direction} ({self.side.upper()}) {size}on {q.ticker} [{q.label}] | "
                 f"entry: buy at or below ${self.max_entry:.2f} (ask now ${self.price:.3f}) | "
@@ -227,7 +235,9 @@ def exit_decision(entry_price: float, bid: float, fair_side: float, t_rem: float
     """
     if bid <= 0 or count <= 0:
         return None
-    if cfg.exit_style == "target":
+    if cfg.exit_style == "hold":
+        pass  # no take-profit; only a stop, if STOP_LOSS_PCT is set
+    elif cfg.exit_style == "target":
         if take_profit is not None and bid >= take_profit - 1e-9:
             return "take_profit"
     elif cfg.edge_exit and t_rem >= 20:

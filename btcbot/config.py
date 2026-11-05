@@ -46,7 +46,7 @@ class Settings:
     #   KXBTC15M = "BTC up or down in the next 15 min"
     #   KXBTCD   = "BTC above/below $X at <hour>"
     #   KXBTC    = "BTC price range at <hour>"
-    series: tuple[str, ...] = ("KXBTC15M", "KXBTCD")
+    series: tuple[str, ...] = ("KXBTC15M",)
 
     # --- money limits (dollars) -------------------------------------------
     bankroll: float = 100.0              # paper starting balance / sizing base
@@ -66,10 +66,11 @@ class Settings:
     max_seconds_to_close: int = 4 * 3600
 
     # --- exits --------------------------------------------------------------
-    stop_loss_pct: float = 0.50          # sell if the bid falls this far below entry (0 = off)
+    stop_loss_pct: float = 0.0           # sell if the bid falls this far below entry (0 = off)
     tp_up_pct: float = 0.50              # UP bets: take profit at +50% over what you paid (0 = fair-value target)
     tp_down_pct: float = 0.50            # DOWN bets: take profit at +50% over what you paid
-    exit_style: str = "target"           # target = fixed take-profit set at entry; dynamic = follow fair value
+    exit_style: str = "hold"             # hold = keep to settlement (lost least in both test periods);
+                                         # target = fixed take-profit set at entry; dynamic = follow fair value
     edge_exit: bool = True               # dynamic style only: sell when the bid beats current fair value
 
     # --- model --------------------------------------------------------------
@@ -124,8 +125,8 @@ class Settings:
             problems.append("MAX_TRADE_DOLLARS cannot exceed MAX_OPEN_DOLLARS")
         if self.min_edge < 0:
             problems.append("MIN_EDGE must be >= 0 (a negative edge means a losing bet by the bot's own math)")
-        if self.exit_style not in ("target", "dynamic"):
-            problems.append("EXIT_STYLE must be target or dynamic")
+        if self.exit_style not in ("hold", "target", "dynamic"):
+            problems.append("EXIT_STYLE must be hold, target or dynamic")
         if not (0 <= self.tp_up_pct <= 10 and 0 <= self.tp_down_pct <= 10):
             problems.append("TP_UP_PCT and TP_DOWN_PCT must be between 0 and 10 (0.60 = +60%)")
         if not 0 <= self.stop_loss_pct < 1:
