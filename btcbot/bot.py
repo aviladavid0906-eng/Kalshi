@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from datetime import datetime
 
 from .broker import LiveBroker, PaperBroker
 from .config import LIVE_CONFIRM_PHRASE, PROD_URL, Settings
 from .journal import Journal
-from .kalshi import Kalshi
+from .kalshi import Kalshi, parse_book
 from .model import annualized, ewma_sigma, taker_fee
 from .notify import Notifier
 from .report import trade_stats
@@ -36,20 +37,24 @@ class Scanner:
 
     def __init__(self, client, cfg: Settings):
         self.client, self.cfg = client, cfg
-        self._events: list[tuple[str, str]] = []
+        self._events: list[tuple[str, str, float]] = []
         self._events_ts = float("-inf")
 
     def events(self, now: float) -> list[tuple[str, str]]:
-        if now - self._events_ts > 60:
+        # Re-list when the cache is a minute old, when a cached event has closed (the next
+        # 15-minute window just opened), or every 10s while nothing is open.
+        ttl = 60 if self._events else 10
+        ended = any(close and close <= now for _, _, close in self._events)
+        if ended or now - self._events_ts > ttl:
             found = []
             for series in self.cfg.series:
                 for e in self.client.events(series, status="open"):
                     close = iso_to_ts(e.get("strike_date"))
                     if close and not (now < close <= now + self.cfg.max_seconds_to_close + 120):
                         continue
-                    found.append((series, e["event_ticker"]))
+                    found.append((series, e["event_ticker"], close))
             self._events, self._events_ts = found, now
-        return self._events
+        return [(series, event) for series, event, _ in self._events]
 
     def quotes(self, now: float) -> list[Quote]:
         out = []
@@ -112,7 +117,7 @@ class Bot:
         now = time.time() if now is None else now
         spot = self.spot.price(now)
         self.refresh_vol(now)
-        quotes = self.scanner.quotes(now)
+        quotes = self.live_quotes(self.scanner.quotes(now), spot, now, self.cfg.book_markets)
         evals = {q.ticker: self.evaluate(q, spot, now) for q in quotes}
         self._log_observations(quotes, evals, spot, now)
         exits = self._manage_exits({q.ticker: q for q in quotes}, evals, now)
@@ -123,6 +128,46 @@ class Bot:
                 "entries": entries, "exits": exits, "settled": settled,
                 "open": len(self.journal.open_positions(self.mode)), "open_cost": st["open_cost"],
                 "today": st["realized_today"]}
+
+    # --- live prices ---------------------------------------------------------------
+    def book_quote(self, q: Quote) -> Quote:
+        """Replace the market list's prices with the live order book's best bid/ask.
+
+        Kalshi's market list can lag the order book by 10+ seconds, which made the
+        bot see "cheap" prices that were already gone.
+        """
+        book = parse_book(self.client.orderbook(q.ticker, depth=10))
+        yb, yb_n = book["yes_bids"][0] if book["yes_bids"] else (0.0, 0.0)
+        ya, ya_n = book["yes_asks"][0] if book["yes_asks"] else (1.0, 0.0)
+        return replace(q, yes_bid=yb, yes_bid_size=yb_n, yes_ask=ya, yes_ask_size=ya_n)
+
+    def live_quotes(self, quotes: list[Quote], spot: float, now: float, limit: int,
+                    trade_window_only: bool = True) -> list[Quote]:
+        """Order-book prices for open positions plus the `limit` markets closest to the money.
+
+        Only these are traded or logged; everything else is ignored this pass.
+        """
+        held = {p.ticker for p in self.journal.open_positions(self.mode)}
+
+        def distance(q: Quote) -> float:
+            if q.strike_type.startswith("greater"):
+                k = q.floor
+            elif q.strike_type.startswith("less"):
+                k = q.cap
+            else:
+                k = ((q.floor or 0.0) + (q.cap or 0.0)) / 2
+            return abs((k if k is not None else spot) - spot)
+
+        tradeable = [q for q in quotes if q.ticker not in held and (not trade_window_only or
+                     self.cfg.min_seconds_to_close <= q.close_ts - now <= self.cfg.max_seconds_to_close)]
+        picked = [q for q in quotes if q.ticker in held] + sorted(tradeable, key=distance)[:limit]
+        out = []
+        for q in picked:
+            try:
+                out.append(self.book_quote(q))
+            except Exception as e:
+                self.journal.log("warn", f"order book unavailable for {q.ticker}: {e}")
+        return out
 
     def _log_observations(self, quotes, evals, spot, now) -> None:
         for q in quotes:
@@ -236,12 +281,12 @@ class Bot:
         n = max(1, int(self.cfg.max_trade_dollars // price))
         return taker_fee(price, n, self.cfg.taker_fee_rate) / n
 
-    def scan(self, now: float | None = None):
+    def scan(self, now: float | None = None, rows_limit: int = 12):
         now = time.time() if now is None else now
         spot = self.spot.price(now)
         self.refresh_vol(now)
         rows = []
-        for q in self.scanner.quotes(now):
+        for q in self.live_quotes(self.scanner.quotes(now), spot, now, rows_limit, trade_window_only=False):
             sigs, fy = self.evaluate(q, spot, now)
             if fy is None or not (0 < q.yes_bid < q.yes_ask < 1):
                 continue

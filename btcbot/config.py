@@ -61,6 +61,7 @@ class Settings:
     min_price: float = 0.10              # skip lottery tickets / near-certainties
     max_price: float = 0.90
     max_spread: float = 0.10             # skip illiquid books
+    book_markets: int = 8                # markets priced from the live order book each pass
     min_seconds_to_close: int = 90
     max_seconds_to_close: int = 4 * 3600
 

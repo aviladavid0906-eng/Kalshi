@@ -183,3 +183,46 @@ def test_live_order_timeout_reconciles_with_account(tmp_path):
     assert pid is not None and j.get(pid).count == 3        # recorded, not lost
     with pytest.raises(TimeoutError):                         # nothing filled: surface the error
         LiveBroker(FlakyLiveClient(fill=False), j, cfg, "demo").buy(sig, 3, T0)
+
+
+class StaleListKalshi(FakeKalshi):
+    """Market list still shows the old cheap ask; the live order book has moved."""
+
+    def __init__(self):
+        super().__init__()
+        self.book_bid, self.book_ask = 0.54, 0.55
+
+    def orderbook(self, ticker, depth=20):
+        return {"orderbook_fp": {"yes_dollars": [[f"{self.book_bid:.4f}", "100"]],
+                                 "no_dollars": [[f"{1 - self.book_ask:.4f}", "100"]]}}
+
+
+def test_stale_list_price_is_ignored(tmp_path):
+    bot, msgs = make_bot(tmp_path)
+    bot.client = bot.scanner.client = bot.broker.client = StaleListKalshi()
+    s = bot.step(now=T0)
+    assert s["entries"] == 0                          # 0.31 on the list was a phantom
+    assert not any("SIGNAL" in t for t, _ in msgs)    # and no misleading alert either
+    bot.client.book_bid, bot.client.book_ask = 0.30, 0.31  # the book really is cheap now
+    assert bot.step(now=T0 + 10)["entries"] == 1
+
+
+def test_scanner_relists_when_window_closes(tmp_path):
+    bot, _ = make_bot(tmp_path)
+    calls = []
+    real = bot.client.events
+    bot.client.events = lambda series, status="open": calls.append(series) or real(series, status)
+    bot.scanner.events(T0)
+    bot.scanner.events(T0 + 30)            # cached
+    assert len(calls) == 1
+    bot.scanner.events(CLOSE + 1)          # cached window closed -> re-list right away
+    assert len(calls) == 2
+
+
+def test_live_quotes_prices_held_and_nearest(tmp_path):
+    bot, _ = make_bot(tmp_path)
+    q = parse_quote(market(0.30, 0.31), "KXBTC15M")
+    far = replace(q, ticker="FAR", floor=150_000.0)
+    out = bot.live_quotes([far, q], 100_000.0, T0, limit=1)
+    assert [x.ticker for x in out] == [q.ticker]
+    assert out[0].yes_ask == pytest.approx(0.31) and out[0].yes_ask_size == 100

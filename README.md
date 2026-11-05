@@ -11,6 +11,7 @@ Works out what each Kalshi bitcoin contract is really worth, calls **UP** or **D
 - **Fair value, not a hunch.** Every contract settles on the 60-second average of CF Benchmarks' BRTI before close. The bot takes the BTC price (Coinbase + Kraken), the time left and recent volatility, and computes the chance that average lands on the YES side.
 - **Only bets on clear mispricings.** Edge = worst-case win chance (under both low- and high-volatility assumptions) − price − Kalshi fee. It must be ≥ `MIN_EDGE` (default 4¢ per $1 contract).
 - **UP** = YES on "above $X" / "up in 15 min"; **DOWN** = NO on the same market.
+- **Live prices only.** Every decision uses the live order book. Kalshi's market list can lag the book by 10+ seconds, so the bot never trades on it.
 - **Exits**
   - *Take profit / model exit:* sell when the bid pays more than the bot's fair value.
   - *Stop loss:* sell if the bid falls `STOP_LOSS_PCT` (default 50%) below entry. On binary contracts this often sells near the bottom. `STOP_LOSS_PCT=0` holds to settlement.

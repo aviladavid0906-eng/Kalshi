@@ -21,12 +21,12 @@ def cmd_scan(cfg: Settings, args) -> None:
     from .bot import Bot
 
     bot = Bot(replace(cfg, mode="paper"))  # scanning never trades and needs no keys
-    spot, sigma, rows = bot.scan()
+    spot, sigma, rows = bot.scan(rows_limit=args.rows)
     from .model import annualized
 
     print(f"BTC ${spot:,.2f} | volatility {annualized(sigma) * 100:.0f}%/yr | {datetime.now():%Y-%m-%d %H:%M} | "
           f"min edge {cfg.min_edge * 100:.0f}c")
-    shown = [r for r in rows if r["signals"]] + [r for r in rows if not r["signals"]][: args.rows]
+    shown = [r for r in rows if r["signals"]] + [r for r in rows if not r["signals"]]
     if not shown:
         print("No open BTC markets in the trading window right now.")
         return
