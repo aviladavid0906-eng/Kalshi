@@ -154,8 +154,10 @@ class Bot:
             pnl = self.broker.sell(pos, bid, reason, now)
             if pnl is not None:
                 n += 1
+                sold = self.journal.closed_positions(self.mode, since=now)[-1]
                 self.notify(f"SOLD ({reason.replace('_', ' ')})",
-                            f"{pos.side.upper()} {pos.ticker} @ ${bid:.3f} | P&L {pnl:+.2f} [{self.mode}]")
+                            f"{sold.count:g}x {pos.side.upper()} {pos.ticker} @ ${sold.exit_price:.3f} "
+                            f"(bought @ ${pos.entry_price:.3f}) | P&L {pnl:+.2f} [{self.mode}]")
         return n
 
     def _enter(self, quotes, evals, now) -> int:
@@ -191,7 +193,8 @@ class Bot:
                 continue
             pos = self.journal.get(pid)
             self.notify(f"BOUGHT {sig.direction}",
-                        f"{sig.text(int(pos.count))} | cost ${pos.cost:.2f} [{self.mode}]")
+                        f"{sig.text(int(pos.count))} | filled @ ${pos.entry_price:.3f}, "
+                        f"cost ${pos.cost:.2f} incl. fees [{self.mode}]")
             used_events.add(sig.quote.event_ticker)
             opened += 1
             if opened >= 2:
