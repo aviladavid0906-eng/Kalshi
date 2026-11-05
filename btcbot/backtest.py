@@ -171,10 +171,10 @@ def load_markets(cfg, series, days, client, out, near_pct):
         out(f"{s}: {len(ms)} settled markets in {events} events, {len(picked)} near the money -> "
             f"fetching Kalshi price history")
         for i, batch in enumerate(_batches(picked), 1):
-            start = min(first for _, _, first in batch)
-            end = max(q0.close_ts for q0, _, _ in batch)
+            b_start = min(first for _, _, first in batch)
+            b_end = max(q0.close_ts for q0, _, _ in batch)
             try:
-                got = client.candlesticks_batch([q0.ticker for q0, _, _ in batch], int(start), int(end))
+                got = client.candlesticks_batch([q0.ticker for q0, _, _ in batch], int(b_start), int(b_end))
             except Exception:
                 got = {}
             for q0, m, first in batch:
