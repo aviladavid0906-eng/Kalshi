@@ -79,6 +79,22 @@ def cmd_backtest(cfg: Settings, args) -> None:
     run_backtest(cfg, series=series, days=args.days, lag_min=args.lag, near_pct=args.near)
 
 
+def cmd_bet(cfg: Settings, args) -> None:
+    from .bet import run_window
+    from .journal import Journal
+
+    journal = Journal(cfg.db_path)
+    total = 0.0
+    try:
+        for i in range(args.windows):
+            r = run_window(cfg, args.amount, journal)
+            total += r.get("pnl") or 0.0
+            if args.windows > 1:
+                print(f"--- after {i + 1} window(s): paper P&L {total:+.2f}")
+    except KeyboardInterrupt:
+        print("\nStopped.")
+
+
 def cmd_check(cfg: Settings, args) -> None:
     from .kalshi import Kalshi
 
@@ -109,6 +125,9 @@ def main(argv=None) -> int:
     p.add_argument("--series", default="KXBTC15M,KXBTCD")
     p.add_argument("--lag", type=int, default=0, help="minutes of delay on BTC price (stress test)")
     p.add_argument("--near", type=float, default=0.01, help="only strikes within this fraction of BTC (0.01 = 1%%)")
+    p = sub.add_parser("bet", help="paper-bet one 15-min window with the v2 rule (never real money)")
+    p.add_argument("--amount", type=float, default=100.0, help="dollars per bet (paper)")
+    p.add_argument("--windows", type=int, default=1, help="how many windows in a row")
     sub.add_parser("check", help="test your Kalshi API key (demo/live)")
     args = ap.parse_args(argv)
     try:
@@ -116,7 +135,8 @@ def main(argv=None) -> int:
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
-    {"scan": cmd_scan, "run": cmd_run, "report": cmd_report, "backtest": cmd_backtest, "check": cmd_check}[args.cmd](cfg, args)
+    {"scan": cmd_scan, "run": cmd_run, "report": cmd_report, "backtest": cmd_backtest, "bet": cmd_bet,
+     "check": cmd_check}[args.cmd](cfg, args)
     return 0
 
 

@@ -53,7 +53,26 @@ Phone alerts: install the free **ntfy** app, subscribe to a long random topic na
 | `python -m btcbot run` | Run the bot in `MODE` from `.env` (`--once` for a single pass) |
 | `python -m btcbot report` | P&L and verdict (`--mode paper/demo/live`) |
 | `python -m btcbot backtest` | Replay settled markets (`--days`, `--series`, `--lag` delay stress test) |
+| `python -m btcbot bet --amount 100` | Paper-bet the next 15-min window with the v2 rule (`--windows N` for several) |
 | `python -m btcbot check` | Test your API key (demo/live) |
+
+## $100 paper bets: what went wrong, and the v2 rule
+On Nov 5, five live $100 paper bets went +$101, +$34, −$100, −$100, −$100 = **−$164**.
+- **Most "edges" were noise:** 2–4¢ disagreements with Kalshi, which predicts better than the bot.
+- **Two of the three losses were entered in the first 40 seconds of the window.** BTC was only $27–29 from the target, so the "edge" was the bot's BTC feed being a few seconds out of step with Kalshi's.
+- **All-in sizing:** at a 2¢ edge the math says bet about 5% of the bankroll, not 100%.
+
+`python -m btcbot bet --amount 100` (paper only) uses the **v2 rule:**
+- Skip the first 5 minutes of the window.
+- Bet only on a 4¢+ edge after fees, on a side priced 35–90¢.
+- No new bets in the last 2 minutes. Hold to settlement.
+
+| Rule (15-min markets, $100 per bet) | Oct 30–Nov 2 | Nov 2–5 |
+|---|---|---|
+| Old: 2¢ edge, any time | −3.2¢ per $1 (253 bets) | +4.2¢ (154) |
+| **v2** | **+3.3¢** (158) | **+7.8¢** (62) |
+
+The v2 rule was the best of 72 rules tuned on either period, and it stayed positive on the other. Over all 220 bets it made **+4.6¢ per $1, but t = 0.7**, which could still be luck. That's why it's paper only.
 
 ## Backtest results
 Default entry rules ($100 bankroll, $5 max per trade, 4¢ minimum edge), 15-minute markets. Each period uses the same entries under every exit rule, after fees.

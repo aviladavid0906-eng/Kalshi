@@ -73,6 +73,12 @@ class Settings:
                                          # target = fixed take-profit set at entry; dynamic = follow fair value
     edge_exit: bool = True               # dynamic style only: sell when the bid beats current fair value
 
+    # --- `bet` command (one-window paper bets, the v2 rule) ---------------------
+    bet_min_edge: float = 0.04           # expected profit per contract after fees
+    bet_skip_first_seconds: int = 300    # early-window "edges" were feed noise
+    bet_min_price: float = 0.35          # no long shots
+    bet_max_price: float = 0.90
+
     # --- model --------------------------------------------------------------
     poll_seconds: float = 10.0
     vol_lookback_min: int = 180
