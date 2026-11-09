@@ -1,4 +1,4 @@
-from btcbot.bet import best_bet, in_entry_window, max_contracts, next_close, walk_cost
+from btcbot.bet import best_bet, in_entry_window, max_contracts, next_close, run_window, ticker_for, walk_cost
 from btcbot.config import Settings
 from btcbot.kalshi import parse_book
 
@@ -38,3 +38,37 @@ def test_entry_window_skips_first_five_minutes_and_last_two():
 def test_next_close():
     assert next_close(1_000_000 * 900 + 10) == (1_000_000 + 1) * 900          # current window still open
     assert next_close(1_000_000 * 900 + 800) == (1_000_000 + 2) * 900         # too late: next one
+
+
+def test_ticker_uses_new_york_close_time():
+    assert ticker_for(1794254400) == "KXBTC15M-26NOV091500-00"   # 12:00 PT = 15:00 ET
+    assert ticker_for(1794255300) == "KXBTC15M-26NOV091515-15"
+
+
+class DownClient:
+    """Kalshi is unreachable (rate limited) the whole window."""
+    def market(self, ticker):
+        raise RuntimeError("HTTP 429")
+
+    def events(self, *a, **k):
+        raise RuntimeError("HTTP 429")
+
+
+class Spot:
+    s = None
+
+    def price(self, now):
+        return 75_000.0
+
+
+def test_unreachable_window_is_skipped_not_stuck(monkeypatch):
+    import btcbot.bet as bet
+    close = 1794254400
+    clock = [close - 300.0]
+    monkeypatch.setattr(bet.time, "time", lambda: clock[0])
+    monkeypatch.setattr(bet.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + max(s, 1)))
+    monkeypatch.setattr(bet, "coinbase_candles", lambda *a, **k: [(0, 0, 0, 0, 75_000.0 + i) for i in range(60)])
+    lines = []
+    r = run_window(Settings(), 100, journal=None, close_ts=close, client=DownClient(), spot=Spot(), printer=lines.append)
+    assert r == {"bet": None, "missed": True}
+    assert any("MISSED" in x for x in lines)

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from .kalshi import Kalshi, parse_book
 from .model import annualized, ewma_sigma, fair_yes, taker_fee
@@ -26,6 +27,29 @@ from .strategy import parse_quote
 
 WINDOW = 900
 LAST_ENTRY_SECONDS = 120
+ET = ZoneInfo("America/New_York")  # Kalshi names 15-min markets by their close time in New York
+
+
+def ticker_for(close_ts: int, series: str = "KXBTC15M") -> str:
+    """Market ticker for the window closing at close_ts, e.g. KXBTC15M-26NOV091500-00."""
+    d = datetime.fromtimestamp(close_ts, ET)
+    return f"{series}-{d:%y%b%d%H%M}".upper() + f"-{d:%M}"
+
+
+def find_window(client, close_ts: int, series: str = "KXBTC15M"):
+    """The window's market: one direct lookup (kind to the rate limit), else search open events."""
+    try:
+        q = parse_quote(client.market(ticker_for(close_ts, series)), series)
+        if q and int(q.close_ts) == close_ts:
+            return q
+    except Exception:
+        pass
+    for e in client.events(series, status="open"):
+        for m in client.markets(event_ticker=e["event_ticker"], status="open"):
+            q = parse_quote(m, series)
+            if q and int(q.close_ts) == close_ts:
+                return q
+    return None
 
 
 def walk_cost(levels, n: int):
@@ -102,6 +126,9 @@ def run_window(cfg, amount: float, journal, *, close_ts: int | None = None, clie
         if now < close_ts - WINDOW:
             time.sleep(min(5.0, close_ts - WINDOW - now + 0.5))
             continue
+        if q is None and close_ts - now < LAST_ENTRY_SECONDS:
+            say("MISSED: couldn't reach this window's market before entries closed. Nothing risked.")
+            return {"bet": None, "missed": True}
         try:
             S = spot.price(now)
             if sigma is None or now - vol_ts > 60:
@@ -109,11 +136,7 @@ def run_window(cfg, amount: float, journal, *, close_ts: int | None = None, clie
                                    halflife=cfg.vol_halflife_min)
                 vol_ts = now
             if q is None:
-                for e in client.events("KXBTC15M", status="open"):
-                    for m in client.markets(event_ticker=e["event_ticker"], status="open"):
-                        qq = parse_quote(m, "KXBTC15M")
-                        if qq and int(qq.close_ts) == close_ts:
-                            q = qq
+                q = find_window(client, close_ts)
                 if q is None:
                     time.sleep(3)
                     continue
