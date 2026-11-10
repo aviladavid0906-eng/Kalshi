@@ -75,7 +75,9 @@ On Nov 5, five live $100 paper bets went +$101, +$34, −$100, −$100, −$100 
 The v2 rule was the best of 72 rules tuned on either period, and it stayed positive on the other. Over all 220 bets it made **+4.6¢ per $1, but t = 0.7**, which could still be luck. That's why it's paper only.
 
 **Update, Nov 9: the v2 edge did not hold on new data.**
-- Live paper, Nov 8–9: 20 bets, 12 wins and 8 losses, +$391. The overnight run had 13 bets and 20 passes, +$74.51.
+- Live paper, Nov 8–10: 49 bets, 29 wins and 20 losses, +$393 (+8¢ per $1, t ≈ 0.6).
+  - Sunday afternoon: 7 bets, +$317. Overnight: 13 bets, +$74.51. Monday noon to midnight: 29 bets, **+$1.59**.
+  - The last 42 bets made +$76 in total (+1.8¢ per $1, t = 0.1). Almost all the profit is the first 7 bets.
 - Backtest on the four days since v2 was tuned (Nov 5–9, never seen): 141 bets, **−3.3¢ per $1**. All 10 days: 367 bets, +0.5¢, t = 0.1. A coin flip after fees.
 - **It almost only bets DOWN:** 89% of backtest bets and all 13 overnight. The bot rates UP about 3¢ below Kalshi.
   - UP bets lost 12¢ per $1. DOWN bets made +2.1¢, but t = 0.4.
